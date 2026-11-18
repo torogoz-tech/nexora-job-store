@@ -90,7 +90,7 @@ fn exercise_notification_claims(
          CREATE TABLE {namespace}.actor_grants(actor_id text NOT NULL, capability text NOT NULL, project_id text);
          CREATE TABLE {namespace}.installation_preferences(singleton boolean PRIMARY KEY, language text NOT NULL);
          CREATE TABLE {namespace}.user_email_changes(id text, expires_at timestamptz, used_at timestamptz, attempts integer, token_secret bytea);
-         CREATE TABLE {namespace}.member_invitations(id text, expires_at timestamptz, status text, token_secret bytea);
+         CREATE TABLE {namespace}.member_invitations(id text, revision integer, expires_at timestamptz, status text, token_secret bytea);
          CREATE TABLE {namespace}.password_reset_requests(id text, expires_at timestamptz, used_at timestamptz, token_secret bytea);
          CREATE TABLE {namespace}.email_notifications(
              event_key text PRIMARY KEY, kind text NOT NULL, project_id text, resource_id text NOT NULL,
@@ -125,15 +125,26 @@ fn exercise_notification_claims(
         &[],
     )?;
 
-    let mut store = NotificationStore::connect(settings, namespace)?;
-    let authorized = store.claim_email_notification(false)?.unwrap();
+    let mut store = NotificationStore::connect(settings, namespace)
+        .unwrap_or_else(|error| panic!("store connection failed: {error:?}"));
+    let authorized = store
+        .claim_email_notification(false)
+        .unwrap_or_else(|error| panic!("authorized notification claim failed: {error:?}"))
+        .unwrap();
     assert_eq!(authorized.event_key, "authorized-event");
     assert_eq!(authorized.attempts, 1);
     assert_eq!(authorized.email, "admin@example.test");
     assert_eq!(authorized.language, "es");
-    store.finish_email_notification(&authorized.event_key, authorized.attempts, "sent")?;
+    store
+        .finish_email_notification(&authorized.event_key, authorized.attempts, "sent")
+        .unwrap_or_else(|error| panic!("notification completion failed: {error:?}"));
 
-    assert!(store.claim_email_notification(false)?.is_none());
+    assert!(
+        store
+            .claim_email_notification(false)
+            .unwrap_or_else(|error| panic!("unauthorized notification claim failed: {error:?}"))
+            .is_none()
+    );
     drop(store);
 
     let rows = admin.query(
