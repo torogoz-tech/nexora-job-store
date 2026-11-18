@@ -14,6 +14,8 @@ impl AnalysisProfileReportStore {
             .as_object()
             .ok_or_else(|| Self::invalid("selection report section must be an object"))?;
         if object.len() != fields.len() || fields.iter().any(|field| !object.contains_key(*field)) {
+            let actual = object.keys().map(String::as_str).collect::<Vec<_>>();
+            eprintln!("selection report fields differ: expected={fields:?}, actual={actual:?}");
             return Err(Self::invalid(
                 "selection report has missing or unexpected fields",
             ));
