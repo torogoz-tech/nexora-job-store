@@ -1,0 +1,20 @@
+[package]
+name = "nexora-knowledge-store"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "PostgreSQL-backed durable knowledge processing storage for Nexora workers"
+repository = "https://github.com/torogoz-tech/nexora-job-store"
+documentation = "https://docs.rs/nexora-knowledge-store"
+
+[dependencies]
+getrandom.workspace = true
+nexora-database-connections = { path = "../nexora-database-connections" }
+nexora-platform.workspace = true
+postgres.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+
+[dev-dependencies]
+postgres.workspace = true
