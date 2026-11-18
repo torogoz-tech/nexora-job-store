@@ -1290,9 +1290,13 @@ dependencies = [
 name = "nexora-task-workflow"
 version = "0.4.0"
 dependencies = [
+ "getrandom 0.3.4",
  "nexora-database-connections",
  "nexora-git-policy",
  "nexora-platform",
+ "postgres",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

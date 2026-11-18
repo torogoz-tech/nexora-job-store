@@ -10,3 +10,7 @@ repository = "https://github.com/torogoz-tech/nexora-job-store"
 nexora-git-policy.workspace = true
 nexora-database-connections.workspace = true
 nexora-platform.workspace = true
+postgres.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+getrandom.workspace = true
