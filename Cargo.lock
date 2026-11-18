@@ -685,13 +685,16 @@ dependencies = [
 name = "nexora-knowledge-store"
 version = "0.4.0"
 dependencies = [
+ "aes-gcm",
  "getrandom 0.3.4",
+ "hkdf",
  "nexora-database-connections",
  "nexora-platform",
  "postgres",
  "serde",
  "serde_json",
  "sha2 0.10.9",
+ "zeroize",
 ]
 
 [[package]]

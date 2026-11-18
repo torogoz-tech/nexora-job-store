@@ -6,9 +6,12 @@ use nexora_database_connections::{DatabaseConnections, PostgresConnection};
 use nexora_platform::PlatformError;
 use postgres::{Client, error::SqlState};
 use serde_json::Value;
+use std::path::PathBuf;
 
 pub struct KnowledgeStore {
     connection: PostgresConnection,
+    pub(crate) namespace: String,
+    pub(crate) secrets_directory: PathBuf,
 }
 
 impl KnowledgeStore {
@@ -33,7 +36,11 @@ impl KnowledgeStore {
             .batch_execute(&options)
             .map_err(Self::database_error)?;
 
-        Ok(Self { connection })
+        Ok(Self {
+            connection,
+            namespace: namespace.to_owned(),
+            secrets_directory: settings.secrets_directory.clone(),
+        })
     }
 
     pub fn claim_knowledge_processing(

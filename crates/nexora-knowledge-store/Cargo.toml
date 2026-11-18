@@ -8,13 +8,16 @@ repository = "https://github.com/torogoz-tech/nexora-job-store"
 documentation = "https://docs.rs/nexora-knowledge-store"
 
 [dependencies]
+aes-gcm.workspace = true
 getrandom.workspace = true
+hkdf.workspace = true
 nexora-database-connections = { path = "../nexora-database-connections" }
 nexora-platform.workspace = true
 postgres.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 sha2.workspace = true
+zeroize.workspace = true
 
 [dev-dependencies]
 postgres.workspace = true
