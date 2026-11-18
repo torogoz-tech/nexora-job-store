@@ -1,0 +1,16 @@
+[package]
+name = "nexora-release-store"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Durable release composition jobs for Nexora workers"
+repository = "https://github.com/torogoz-tech/nexora-job-store"
+
+[dependencies]
+nexora-analysis-store = { path = "../nexora-analysis-store" }
+nexora-database-connections = { path = "../nexora-database-connections" }
+nexora-platform.workspace = true
+nexora-source = { git = "https://github.com/torogoz-tech/nexora-analysis-engine.git", tag = "0.4.0" }
+postgres.workspace = true
+serde_json.workspace = true
+getrandom.workspace = true

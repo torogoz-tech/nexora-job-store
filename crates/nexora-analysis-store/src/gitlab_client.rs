@@ -150,4 +150,26 @@ impl GitlabClient {
         }
         Ok((id, name.into()))
     }
+
+    pub fn branch(&self, token: &str, id: &str, branch: &str) -> Result<String, PlatformError> {
+        if id.parse::<u64>().ok().filter(|id| *id > 0).is_none()
+            || !nexora_platform::DevelopmentPolicy::valid_ref(branch)
+        {
+            return Err(PlatformError::Validation("invalid Git branch reference"));
+        }
+
+        let mut uri = self
+            .policy
+            .url(&format!("/api/v4/projects/{id}/repository/branches/"))?;
+        uri.path_segments_mut()
+            .map_err(|_| PlatformError::Validation("invalid Git endpoint"))?
+            .pop_if_empty()
+            .push(branch);
+        let value = self.get(uri, token)?;
+        value["commit"]["id"]
+            .as_str()
+            .filter(|sha| crate::git_commit_identity::GitCommitIdentity::valid(sha))
+            .map(str::to_owned)
+            .ok_or(PlatformError::Unavailable)
+    }
 }

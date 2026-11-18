@@ -1211,6 +1211,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "nexora-release-store"
+version = "0.4.0"
+dependencies = [
+ "getrandom 0.3.4",
+ "nexora-analysis-store",
+ "nexora-database-connections",
+ "nexora-platform",
+ "nexora-source",
+ "postgres",
+ "serde_json",
+]
+
+[[package]]
 name = "nexora-runtime"
 version = "0.4.0"
 dependencies = [

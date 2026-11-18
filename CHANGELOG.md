@@ -8,4 +8,7 @@
 - Add knowledge-worker runtime access to API-managed OpenAI settings and credentials while preserving the existing encrypted-secret envelope and master-key checks.
 - Extract deterministic knowledge chunking into `nexora-knowledge-store` so knowledge processing does not need the analysis retrieval package.
 - Move the concrete snapshot, graph, query, cache, and knowledge runtime adapters into the independently tested `nexora-runtime` package in this repository.
+- Add `nexora-analysis-store` repository transport plans that verify provider identity, connection authorization, bounded origins, and branch commit identities before workers fetch Git data.
+- Add `nexora-release-store` so the release worker can authorize, compose, and record release jobs without importing the API's full platform store. Existing release branches are accepted only when their head matches the deterministic composition; a different head is never overwritten.
+- Keep the release composition job durable in PostgreSQL, re-check current session or API-key authority and task commit pins, and verify repository authority and provider branch state around publication.
 - Replace runtime integration-test references to API checkout paths with explicit protected test-configuration and language-profile environment variables; retain public domain-boundary fixtures in the package.
