@@ -1,7 +1,11 @@
 mod analysis_profile_report_store;
 mod analysis_profile_selection_store;
+mod analysis_runtime_settings_store;
+mod analysis_service_runtime_settings;
 mod analysis_store;
 mod audit_writer;
+mod code_snapshot_embedding;
+mod code_snapshot_embedding_store;
 mod git_author_identity;
 mod git_author_observation_writer;
 mod git_author_policy;
@@ -43,7 +47,9 @@ mod repository_webhook_job_authority;
 mod secret_authority;
 mod secret_generator;
 
+pub use analysis_service_runtime_settings::AnalysisServiceRuntimeSettings;
 pub use analysis_store::AnalysisStore;
+pub use code_snapshot_embedding::CodeSnapshotEmbedding;
 pub use git_network_policy::GitNetworkPolicy;
 pub(crate) use provider_secret_context::ProviderSecretContext;
 pub(crate) use provider_secret_envelope::ProviderSecretEnvelope;

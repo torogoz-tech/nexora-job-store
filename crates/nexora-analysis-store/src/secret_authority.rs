@@ -3,11 +3,13 @@ use nexora_platform::GitProvider;
 #[derive(Clone, Copy)]
 pub enum SecretAuthority {
     Git(GitProvider),
+    OpenAi,
 }
 impl SecretAuthority {
     pub fn as_str(self) -> &'static str {
         match self {
             Self::Git(provider) => provider.as_str(),
+            Self::OpenAi => "openai",
         }
     }
 }
