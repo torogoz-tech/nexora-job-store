@@ -1,5 +1,6 @@
 use crate::{
-    KnowledgeProcessingJob, KnowledgeProcessingSource, knowledge_store_secret::KnowledgeStoreSecret,
+    KnowledgeEmbeddingRecord, KnowledgeProcessingJob, KnowledgeProcessingSource,
+    knowledge_store_secret::KnowledgeStoreSecret,
 };
 use nexora_database_connections::{DatabaseConnections, PostgresConnection};
 use nexora_platform::PlatformError;
@@ -196,6 +197,138 @@ impl KnowledgeStore {
             .map_err(Self::database_error)?;
         transaction.commit().map_err(Self::database_error)?;
         Ok(())
+    }
+
+    pub fn store_knowledge_embeddings(
+        &mut self,
+        job: &KnowledgeProcessingJob,
+        embedding_model: &str,
+        embeddings: &[KnowledgeEmbeddingRecord],
+    ) -> Result<bool, PlatformError> {
+        if embedding_model.is_empty() || embedding_model.len() > 128 || embeddings.is_empty() {
+            return Err(PlatformError::Validation("invalid knowledge embeddings"));
+        }
+        let lease_digest = KnowledgeStoreSecret::digest(&job.lease_token);
+        let mut transaction = self.client().transaction().map_err(Self::database_error)?;
+        let status = transaction
+            .query_opt(
+                "SELECT status FROM knowledge_processing_jobs WHERE id=$1 AND lease_token_digest=$2 AND lease_until>clock_timestamp() FOR UPDATE",
+                &[&job.id, &lease_digest],
+            )
+            .map_err(Self::database_error)?
+            .map(|row| row.get::<_, String>(0));
+        if status.as_deref() != Some("structured") {
+            transaction.rollback().map_err(Self::database_error)?;
+            return Ok(false);
+        }
+
+        let mut chunk_ids = std::collections::HashSet::new();
+        for embedding in embeddings {
+            if embedding.values.is_empty()
+                || embedding.values.len() > i32::MAX as usize
+                || embedding.content_hash.is_empty()
+                || embedding.content_hash.len() > 128
+                || embedding.values.iter().any(|value| !value.is_finite())
+                || !chunk_ids.insert(embedding.chunk_id.as_str())
+            {
+                return Err(PlatformError::Validation("invalid knowledge embedding"));
+            }
+            let literal = format!(
+                "[{}]",
+                embedding
+                    .values
+                    .iter()
+                    .map(ToString::to_string)
+                    .collect::<Vec<_>>()
+                    .join(",")
+            );
+            let dimension = embedding.values.len() as i32;
+            let changed = transaction
+                .execute(
+                    "INSERT INTO knowledge_embeddings(chunk_id,embedding_model,dimension,embedding,content_hash,published) SELECT c.id,$2,$3,$4::text::vector,$5,false FROM knowledge_chunks c WHERE c.id=$1 AND c.job_id=$6 AND c.content_hash=$5 ON CONFLICT(chunk_id,embedding_model,dimension) DO UPDATE SET embedding=EXCLUDED.embedding,content_hash=EXCLUDED.content_hash,published=false,created_at=clock_timestamp()",
+                    &[&embedding.chunk_id, &embedding_model, &dimension, &literal, &embedding.content_hash, &job.id],
+                )
+                .map_err(Self::database_error)?;
+            if changed != 1 {
+                return Err(PlatformError::Conflict(
+                    "knowledge embedding does not match a current chunk",
+                ));
+            }
+        }
+        transaction.commit().map_err(Self::database_error)?;
+        Ok(true)
+    }
+
+    pub fn publish_knowledge_embeddings(
+        &mut self,
+        job: &KnowledgeProcessingJob,
+        embedding_model: &str,
+    ) -> Result<bool, PlatformError> {
+        if embedding_model.is_empty() || embedding_model.len() > 128 {
+            return Err(PlatformError::Validation("invalid embedding model"));
+        }
+        let lease_digest = KnowledgeStoreSecret::digest(&job.lease_token);
+        let mut transaction = self.client().transaction().map_err(Self::database_error)?;
+        let status = transaction
+            .query_opt(
+                "SELECT status FROM knowledge_processing_jobs WHERE id=$1 AND lease_token_digest=$2 AND lease_until>clock_timestamp() FOR UPDATE",
+                &[&job.id, &lease_digest],
+            )
+            .map_err(Self::database_error)?
+            .map(|row| row.get::<_, String>(0));
+        if status.as_deref() != Some("structured") {
+            transaction.rollback().map_err(Self::database_error)?;
+            return Ok(false);
+        }
+        let chunks: i64 = transaction
+            .query_one(
+                "SELECT count(*) FROM knowledge_chunks WHERE job_id=$1",
+                &[&job.id],
+            )
+            .map_err(Self::database_error)?
+            .get(0);
+        if chunks == 0 {
+            return Err(PlatformError::Validation(
+                "knowledge job produced no chunks",
+            ));
+        }
+        let missing_embeddings: bool = transaction
+            .query_one(
+                "SELECT EXISTS(SELECT 1 FROM knowledge_chunks c WHERE c.job_id=$1 AND NOT EXISTS(SELECT 1 FROM knowledge_embeddings e WHERE e.chunk_id=c.id AND e.embedding_model=$2 AND e.content_hash=c.content_hash))",
+                &[&job.id, &embedding_model],
+            )
+            .map_err(Self::database_error)?
+            .get(0);
+        if missing_embeddings {
+            return Err(PlatformError::Conflict(
+                "knowledge embeddings are incomplete or stale",
+            ));
+        }
+        transaction
+            .execute(
+                "UPDATE knowledge_embeddings e SET published=true,created_at=clock_timestamp() FROM knowledge_chunks c WHERE c.id=e.chunk_id AND c.job_id=$1 AND c.content_hash=e.content_hash AND e.embedding_model=$2",
+                &[&job.id, &embedding_model],
+            )
+            .map_err(Self::database_error)?;
+        transaction
+            .execute(
+                "UPDATE knowledge_chunks SET published=true WHERE job_id=$1",
+                &[&job.id],
+            )
+            .map_err(Self::database_error)?;
+        let changed = transaction
+            .execute(
+                "UPDATE knowledge_processing_jobs SET status='indexed',lease_owner=NULL,lease_token_digest=NULL,lease_until=NULL,updated_at=clock_timestamp(),last_error=NULL WHERE id=$1 AND status='structured' AND lease_token_digest=$2 AND lease_until>clock_timestamp()",
+                &[&job.id, &lease_digest],
+            )
+            .map_err(Self::database_error)?;
+        if changed != 1 {
+            return Err(PlatformError::Conflict(
+                "knowledge processing lease expired before publication",
+            ));
+        }
+        transaction.commit().map_err(Self::database_error)?;
+        Ok(true)
     }
 
     pub(crate) fn client(&mut self) -> &mut Client {

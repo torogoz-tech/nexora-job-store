@@ -112,13 +112,51 @@ fn concurrent_claims_assign_one_approved_job_to_only_one_worker() {
     store
         .finish_knowledge_processing(&second_lease, &structure, &chunks)
         .unwrap();
+    let embedding = [nexora_knowledge_store::KnowledgeEmbeddingRecord {
+        chunk_id: "chunk-a".to_owned(),
+        content_hash: "chunk-hash-a".to_owned(),
+        values: vec![0.1, 0.2],
+    }];
+    assert!(
+        store
+            .publish_knowledge_embeddings(&second_lease, "test-model")
+            .is_err()
+    );
+    assert!(
+        !store
+            .store_knowledge_embeddings(&first_lease, "test-model", &embedding)
+            .unwrap()
+    );
+    assert!(
+        store
+            .store_knowledge_embeddings(&second_lease, "test-model", &embedding)
+            .unwrap()
+    );
+    assert!(
+        !store
+            .publish_knowledge_embeddings(&first_lease, "test-model")
+            .unwrap()
+    );
+    store
+        .publish_knowledge_embeddings(&second_lease, "test-model")
+        .unwrap();
+    let published: bool = admin
+        .query_one(
+            &format!(
+                "SELECT published FROM {namespace}.knowledge_embeddings WHERE chunk_id='chunk-a'"
+            ),
+            &[],
+        )
+        .unwrap()
+        .get(0);
+    assert!(published);
     assert!(
         !store
             .fail_knowledge_processing(&first_lease, "stale worker")
             .unwrap()
     );
     assert!(
-        store
+        !store
             .fail_knowledge_processing(&second_lease, "current worker")
             .unwrap()
     );
@@ -129,7 +167,41 @@ fn concurrent_claims_assign_one_approved_job_to_only_one_worker() {
         )
         .unwrap()
         .get(0);
-    assert_eq!(state, "failed");
+    assert_eq!(state, "indexed");
+
+    admin
+        .execute(
+            &format!(
+                "INSERT INTO {namespace}.knowledge_processing_jobs(id,source_kind,resource_id,source_revision,content_hash,status) VALUES('job-failure','document','resource-f',1,'hash-f','queued')"
+            ),
+            &[],
+        )
+        .unwrap();
+    admin
+        .execute(
+            &format!(
+                "INSERT INTO {namespace}.knowledge_reviews(id,kind,resource_id,resource_revision,status) VALUES('review-f','document','resource-f',1,'approved')"
+            ),
+            &[],
+        )
+        .unwrap();
+    let failed_job = store.claim_knowledge_processing().unwrap().unwrap();
+    assert_eq!(failed_job.id, "job-failure");
+    let failed_job_chunks = [KnowledgeChunkRecord {
+        id: "chunk-f".to_owned(),
+        sequence: 0,
+        title: "Failure source".to_owned(),
+        content: "Failure body".to_owned(),
+        content_hash: "chunk-hash-f".to_owned(),
+    }];
+    store
+        .finish_knowledge_processing(&failed_job, &structure, &failed_job_chunks)
+        .unwrap();
+    assert!(
+        store
+            .fail_knowledge_processing(&failed_job, "current worker failed")
+            .unwrap()
+    );
 
     admin
         .batch_execute(&format!("DROP SCHEMA {namespace} CASCADE"))
@@ -179,6 +251,15 @@ fn create_schema(admin: &mut Client, namespace: &str) -> Result<(), postgres::Er
              sequence integer NOT NULL, title text NOT NULL, content text NOT NULL,
              content_hash text NOT NULL, published boolean NOT NULL DEFAULT false,
              UNIQUE(job_id,sequence)
+         );
+         CREATE DOMAIN {namespace}.vector AS text;
+         CREATE TABLE {namespace}.knowledge_embeddings (
+             chunk_id text NOT NULL REFERENCES {namespace}.knowledge_chunks(id),
+             embedding_model text NOT NULL, dimension integer NOT NULL,
+             embedding {namespace}.vector NOT NULL, content_hash text NOT NULL,
+             published boolean NOT NULL DEFAULT false,
+             created_at timestamptz NOT NULL DEFAULT clock_timestamp(),
+             PRIMARY KEY(chunk_id,embedding_model,dimension)
          );
          INSERT INTO {namespace}.knowledge_processing_jobs
              (id,source_kind,resource_id,source_revision,content_hash,status)
