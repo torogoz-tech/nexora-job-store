@@ -152,6 +152,7 @@ fn create_schema(admin: &mut Client, namespace: &str) -> Result<(), postgres::Er
          CREATE TABLE {namespace}.knowledge_processing_jobs(
              id text PRIMARY KEY,project_id text,source_kind text NOT NULL,resource_id text NOT NULL,
              source_revision bigint NOT NULL,content_hash text NOT NULL,status text NOT NULL,
+             updated_at timestamptz NOT NULL DEFAULT now(),
              UNIQUE(source_kind,resource_id,source_revision,content_hash)
          );
          INSERT INTO {namespace}.actors VALUES('actor-a',true);

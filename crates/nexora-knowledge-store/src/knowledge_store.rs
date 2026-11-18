@@ -336,7 +336,6 @@ impl KnowledgeStore {
     }
 
     pub(crate) fn database_error(error: postgres::Error) -> PlatformError {
-        eprintln!("knowledge store database error: {error:?}");
         match error.code() {
             Some(code) if code == &SqlState::UNIQUE_VIOLATION => {
                 PlatformError::Conflict("resource already exists")
