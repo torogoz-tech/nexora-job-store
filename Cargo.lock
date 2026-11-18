@@ -17,7 +17,7 @@ checksum = "cf8baf1c55e62ffcace7a9f06f4bd9cd3f0c4beb022d3b367256b91b87513d98"
 [[package]]
 name = "nexora-core"
 version = "0.4.0"
-source = "git+https://github.com/torogoz-tech/nexora-platform-contracts.git?branch=develop#e22c06c7a66ef536c5e45cec4adebf2752a4321d"
+source = "git+https://github.com/torogoz-tech/nexora-platform-contracts.git?tag=0.4.0#0d9e8ccdaffe82b892486805296ddab55a2aaef8"
 dependencies = [
  "serde",
  "thiserror",
