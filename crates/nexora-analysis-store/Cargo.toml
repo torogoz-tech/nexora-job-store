@@ -1,0 +1,30 @@
+[package]
+name = "nexora-analysis-store"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "PostgreSQL-backed repository analysis job storage for Nexora workers"
+repository = "https://github.com/torogoz-tech/nexora-job-store"
+documentation = "https://docs.rs/nexora-analysis-store"
+
+[dependencies]
+aes-gcm.workspace = true
+base64.workspace = true
+getrandom.workspace = true
+hkdf.workspace = true
+jsonwebtoken = { version = "=11.1.0", features = ["rust_crypto"] }
+nexora-core.workspace = true
+nexora-database-connections = { path = "../nexora-database-connections" }
+nexora-language = { git = "https://github.com/torogoz-tech/nexora-analysis-engine.git", tag = "0.4.0" }
+nexora-platform.workspace = true
+nexora-runtime = { path = "../nexora-runtime" }
+nexora-source = { git = "https://github.com/torogoz-tech/nexora-analysis-engine.git", tag = "0.4.0" }
+postgres.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+subtle = "2"
+time = { version = "0.3", features = ["parsing"] }
+ureq = { version = "3", features = ["json"] }
+url = "2"
+zeroize.workspace = true
