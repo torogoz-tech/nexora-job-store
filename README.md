@@ -1,8 +1,8 @@
 # Nexora Job Store
 
-Shared PostgreSQL persistence packages for durable Nexora worker jobs. This workspace separates analysis, release, knowledge, and notification operations into independently selectable Cargo packages.
+Shared PostgreSQL persistence packages for durable Nexora worker jobs. This workspace separates analysis, release, knowledge, and notification operations into independently selectable Cargo packages. `nexora-runtime` owns snapshot, graph, query, cache, and knowledge runtime adapters. `nexora-knowledge-store` owns knowledge-job persistence, API-compatible OpenAI runtime settings, encrypted credential reads, and deterministic source chunking. `nexora-notification-store` owns SMTP notification claiming, retry state, authorization checks, email rendering, and decryption of installation-managed SMTP and action-token secrets.
 
-PostgreSQL is authoritative for job state. RabbitMQ wake-up messages only notify workers to drain eligible work. Preserve existing lease fencing, retry limits, cancellation rules, project/tenant scope, and terminal states while extracting the stores.
+PostgreSQL is authoritative for job state. RabbitMQ wake-up messages only notify workers to drain eligible work. Preserve existing lease fencing, retry limits, cancellation rules, project/tenant scope, recipient authorization, secret-encryption formats, and terminal states while extracting the stores.
 
 All packages in this repository are released together at version `0.4.0`.
 
@@ -15,3 +15,5 @@ The `0.4.0` extraction is in progress on `develop`.
 Use the Rust toolchain declared by the workspace. Run `cargo fmt --all -- --check`, `cargo check --workspace --locked`, `cargo test --workspace --locked`, and `cargo clippy --workspace --all-targets --locked -- -D warnings` before submitting changes. PostgreSQL integration tests require the documented disposable test database.
 
 See [CONTRIBUTING.md](CONTRIBUTING.md), [SECURITY.md](SECURITY.md), and [CHANGELOG.md](CHANGELOG.md).
+
+The ignored runtime integration tests require the isolated PostgreSQL, Dragonfly, and Neo4j services described by each test. Set `NEXORA_TEST_CONNECTIONS` to a protected database-connections JSON file and `NEXORA_TEST_LANGUAGE_PROFILE` to a JavaScript profile checkout before running them with `cargo test -p nexora-runtime -- --ignored`. The connections file must point to disposable test services.

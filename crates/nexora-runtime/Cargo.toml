@@ -1,0 +1,25 @@
+[package]
+name = "nexora-runtime"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "PostgreSQL, graph, cache, and snapshot runtime adapters for Nexora"
+repository = "https://github.com/torogoz-tech/nexora-job-store"
+
+[dependencies]
+nexora-core.workspace = true
+nexora-database-connections = { path = "../nexora-database-connections" }
+nexora-graph.workspace = true
+nexora-storage.workspace = true
+nexora-indexer.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+postgres.workspace = true
+redis.workspace = true
+ureq.workspace = true
+base64.workspace = true
+flate2.workspace = true
+
+[dev-dependencies]
+nexora-language = { git = "https://github.com/torogoz-tech/nexora-analysis-engine.git", tag = "0.4.0" }
