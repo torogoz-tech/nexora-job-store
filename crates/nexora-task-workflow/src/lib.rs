@@ -8,6 +8,8 @@ mod task_transition_authority;
 #[allow(dead_code)]
 mod task_transition_continuation;
 #[allow(dead_code)]
+mod task_transition_pending;
+#[allow(dead_code)]
 mod task_transition_provider_authority;
 #[allow(dead_code)]
 mod task_transition_run;

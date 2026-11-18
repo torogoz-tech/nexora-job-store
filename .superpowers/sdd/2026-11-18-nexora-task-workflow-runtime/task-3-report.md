@@ -33,3 +33,20 @@ The ignored integration test, `task_transition_session_lock_serializes_worker_po
 - `crates/nexora-task-workflow/tests/task_transition_continuation.rs`
 
 The pre-existing untracked `docs/` directory at the repository root was left untouched. The approved plan, spec, and progress ledger were not changed.
+
+## Review-fix round 1 (`199a9fa`)
+
+- Changed provider authority lock order to read the repository binding without a lock, lock the Git connection with `FOR SHARE`, then re-read and lock the repository with `FOR SHARE`. The locked binding must preserve the observed connection, Git source kind, and repository revision. Existing metadata, connection, credential, and source-generation revision checks remain in place.
+- Replaced the single 64-row continuation scan with 64-row keyset pages ordered by `(updated_at,id)`. The selector advances past rows whose task advisory lock belongs to another pod, retains the same advisory lock, rereads status and `updated_at`, and releases a stale lock. It holds only one bounded page at a time and does not spin on a busy task.
+- Projectless transition failure now revalidates the current assignee and eligible role under `FOR SHARE OF t,r` in the same transaction before it updates the run or writes history/audit. The check is shared with initial projectless transition authorization.
+- Moved `PendingTaskTransition` and its provider-intent tests to the focused `task_transition_pending.rs` file.
+- Added ignored PostgreSQL tests for scanning beyond 64 advisory-locked candidates and rejecting a projectless task after reassignment. Both require the isolated PostgreSQL configuration and migration 0088; they were not run here.
+
+Review-fix verification:
+
+- `cargo fmt --all -- --check` — passed.
+- `cargo test -p nexora-task-workflow --locked` — passed: 14 passed, 3 ignored (the existing session-lock integration plus the two new PostgreSQL tests), 0 failed.
+- `cargo check -p nexora-task-workflow --locked` — passed.
+- `cargo clippy -p nexora-task-workflow --locked --all-targets -- -D warnings` — passed.
+- `cargo tree -e normal -p nexora-task-workflow --locked` — inspected; the normal dependency graph remains limited to platform, database connection, Git policy, PostgreSQL, and serialization crates, with no API store, analysis store, indexer, or runtime.
+- `git diff --check` — passed.

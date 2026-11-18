@@ -1,28 +1,9 @@
-use crate::{TaskWorkflowStore, task_transition_authority::TaskTransitionAuthority};
+use crate::{
+    TaskWorkflowStore, task_transition_authority::TaskTransitionAuthority,
+    task_transition_pending::PendingTaskTransition,
+};
 use nexora_platform::{AuthContext, AuthMethod, PlatformError};
 use serde_json::{Value, json};
-
-#[derive(Debug, Clone)]
-pub(crate) struct PendingTaskTransition {
-    pub(crate) id: String,
-    pub(crate) task_id: String,
-    pub(crate) actor_id: String,
-    pub(crate) credential_id: String,
-    pub(crate) auth_method: AuthMethod,
-    pub(crate) record: Value,
-}
-
-impl PendingTaskTransition {
-    pub(crate) fn needs_provider_reconciliation(&self) -> bool {
-        self.record["provider_intents"]
-            .as_object()
-            .is_some_and(|intents| {
-                intents
-                    .values()
-                    .any(|intent| intent["status"] == "request_started")
-            })
-    }
-}
 
 /// Internal continuation-selection and original-authority failure operations.
 pub(crate) struct TaskTransitionContinuation;
@@ -33,62 +14,72 @@ impl TaskTransitionContinuation {
     pub(crate) fn select(
         store: &mut TaskWorkflowStore,
     ) -> Result<Option<PendingTaskTransition>, PlatformError> {
-        let rows = store
-            .client()
-            .query(
-                "SELECT id,task_id,actor_id,credential_id,auth_method,record,updated_at::text FROM task_transition_runs WHERE record->>'status'='ready' OR (record->>'status'='waiting_external' AND updated_at<clock_timestamp()-interval '30 seconds') OR (record->>'status'='running' AND updated_at<clock_timestamp()-interval '30 seconds') ORDER BY updated_at,id LIMIT 64",
-                &[],
-            )
-            .map_err(|_| PlatformError::Storage)?;
-        for row in rows {
-            let task_id: String = row.get(1);
-            let lock_name = format!("task-transition:{task_id}");
-            let acquired: bool = store
-                .client()
-                .query_one(
-                    "SELECT pg_try_advisory_lock(hashtextextended($1,0))",
-                    &[&lock_name],
-                )
-                .map_err(|_| PlatformError::Storage)?
-                .get(0);
-            if !acquired {
-                continue;
+        let mut cursor: Option<(String, String)> = None;
+        loop {
+            let rows = match cursor.as_ref() {
+                Some((updated_at, id)) => store.client().query(
+                    "SELECT id,task_id,actor_id,credential_id,auth_method,record,updated_at::text FROM task_transition_runs WHERE (record->>'status'='ready' OR (record->>'status'='waiting_external' AND updated_at<clock_timestamp()-interval '30 seconds') OR (record->>'status'='running' AND updated_at<clock_timestamp()-interval '30 seconds')) AND (updated_at,id)>($1::timestamptz,$2::text) ORDER BY updated_at,id LIMIT 64",
+                    &[updated_at, id],
+                ),
+                None => store.client().query(
+                    "SELECT id,task_id,actor_id,credential_id,auth_method,record,updated_at::text FROM task_transition_runs WHERE record->>'status'='ready' OR (record->>'status'='waiting_external' AND updated_at<clock_timestamp()-interval '30 seconds') OR (record->>'status'='running' AND updated_at<clock_timestamp()-interval '30 seconds') ORDER BY updated_at,id LIMIT 64",
+                    &[],
+                ),
             }
-            let run_id: String = row.get(0);
-            let original_updated_at: String = row.get(6);
-            let fresh = store.client().query_opt(
-                "SELECT id,task_id,actor_id,credential_id,auth_method,record FROM task_transition_runs WHERE id=$1 AND task_id=$2 AND updated_at=$3::timestamptz AND (record->>'status'='ready' OR (record->>'status'='waiting_external' AND updated_at<clock_timestamp()-interval '30 seconds') OR (record->>'status'='running' AND updated_at<clock_timestamp()-interval '30 seconds'))",
-                &[&run_id, &task_id, &original_updated_at],
-            );
-            let fresh = match fresh {
-                Ok(Some(fresh)) => fresh,
-                Ok(None) => {
-                    Self::release_task_lock(store, &task_id)?;
+            .map_err(|_| PlatformError::Storage)?;
+            if rows.is_empty() {
+                return Ok(None);
+            }
+            for row in rows {
+                cursor = Some((row.get(6), row.get(0)));
+                let task_id: String = row.get(1);
+                let lock_name = format!("task-transition:{task_id}");
+                let acquired: bool = store
+                    .client()
+                    .query_one(
+                        "SELECT pg_try_advisory_lock(hashtextextended($1,0))",
+                        &[&lock_name],
+                    )
+                    .map_err(|_| PlatformError::Storage)?
+                    .get(0);
+                if !acquired {
                     continue;
                 }
-                Err(_) => {
-                    Self::release_task_lock(store, &task_id)?;
-                    return Err(PlatformError::Storage);
-                }
-            };
-            let method = match fresh.get::<_, String>(4).as_str() {
-                "session" => AuthMethod::Session,
-                "api_key" => AuthMethod::ApiKey,
-                _ => {
-                    let _ = Self::release_task_lock(store, &task_id);
-                    return Err(PlatformError::Storage);
-                }
-            };
-            return Ok(Some(PendingTaskTransition {
-                id: fresh.get(0),
-                task_id,
-                actor_id: fresh.get(2),
-                credential_id: fresh.get(3),
-                auth_method: method,
-                record: fresh.get(5),
-            }));
+                let run_id: String = row.get(0);
+                let original_updated_at: String = row.get(6);
+                let fresh = store.client().query_opt(
+                    "SELECT id,task_id,actor_id,credential_id,auth_method,record FROM task_transition_runs WHERE id=$1 AND task_id=$2 AND updated_at=$3::timestamptz AND (record->>'status'='ready' OR (record->>'status'='waiting_external' AND updated_at<clock_timestamp()-interval '30 seconds') OR (record->>'status'='running' AND updated_at<clock_timestamp()-interval '30 seconds'))",
+                    &[&run_id, &task_id, &original_updated_at],
+                );
+                let fresh = match fresh {
+                    Ok(Some(fresh)) => fresh,
+                    Ok(None) => {
+                        Self::release_task_lock(store, &task_id)?;
+                        continue;
+                    }
+                    Err(_) => {
+                        Self::release_task_lock(store, &task_id)?;
+                        return Err(PlatformError::Storage);
+                    }
+                };
+                let method = match fresh.get::<_, String>(4).as_str() {
+                    "session" => AuthMethod::Session,
+                    "api_key" => AuthMethod::ApiKey,
+                    _ => {
+                        let _ = Self::release_task_lock(store, &task_id);
+                        return Err(PlatformError::Storage);
+                    }
+                };
+                return Ok(Some(PendingTaskTransition {
+                    id: fresh.get(0),
+                    task_id,
+                    actor_id: fresh.get(2),
+                    credential_id: fresh.get(3),
+                    auth_method: method,
+                    record: fresh.get(5),
+                }));
+            }
         }
-        Ok(None)
     }
 
     fn revalidate_original_authority(
@@ -200,38 +191,8 @@ fn authority_failure_patch(credential_invalid: bool) -> Value {
 
 #[cfg(test)]
 mod tests {
-    use super::PendingTaskTransition;
-    use nexora_platform::AuthMethod;
+    use super::TaskTransitionContinuation;
     use serde_json::json;
-
-    fn transition(record: serde_json::Value) -> PendingTaskTransition {
-        PendingTaskTransition {
-            id: "trn_1".into(),
-            task_id: "tsk_1".into(),
-            actor_id: "act_1".into(),
-            credential_id: "ses_1".into(),
-            auth_method: AuthMethod::Session,
-            record,
-        }
-    }
-
-    #[test]
-    fn requires_reconciliation_before_replaying_started_provider_intent() {
-        assert!(
-            transition(json!({"provider_intents":{"pr:1":{"status":"request_started"}}}))
-                .needs_provider_reconciliation()
-        );
-        assert!(
-            !transition(json!({"provider_intents":{"pr:1":{"status":"confirmed"}}}))
-                .needs_provider_reconciliation()
-        );
-        assert!(!transition(json!({"provider_intents":{}})).needs_provider_reconciliation());
-    }
-
-    #[test]
-    fn missing_provider_intent_map_is_not_a_replay_barrier() {
-        assert!(!transition(json!({"status":"running"})).needs_provider_reconciliation());
-    }
 
     #[test]
     fn credential_failure_keeps_the_existing_terminal_fields_and_message() {
@@ -255,5 +216,75 @@ mod tests {
                 "message":"Original execution authority changed. Reload the task and retry explicitly."
             })
         );
+    }
+
+    #[test]
+    #[ignore = "requires isolated PostgreSQL with API migration 0088 applied"]
+    fn selection_pages_past_sixty_four_candidates_locked_by_another_pod() {
+        use crate::TaskWorkflowStore;
+        use nexora_database_connections::{DatabaseConnections, PostgresConnection};
+        use std::path::Path;
+
+        let settings_path = std::env::var("NEXORA_TASK_WORKFLOW_TEST_DATABASE")
+            .expect("set NEXORA_TASK_WORKFLOW_TEST_DATABASE to a private connection-settings file");
+        let settings = DatabaseConnections::load(Path::new(&settings_path)).unwrap();
+        let namespace = std::env::var("NEXORA_TASK_WORKFLOW_TEST_NAMESPACE")
+            .unwrap_or_else(|_| "nexora_platform_test".into());
+        let mut worker = TaskWorkflowStore::connect(&settings, &namespace).unwrap();
+        let mut blocker = PostgresConnection::connect(&settings).unwrap();
+        worker
+            .client()
+            .batch_execute(
+                "CREATE TEMP TABLE task_transition_runs (
+                    id text PRIMARY KEY,
+                    task_id text NOT NULL,
+                    actor_id text NOT NULL,
+                    credential_id text NOT NULL,
+                    auth_method text NOT NULL,
+                    record jsonb NOT NULL,
+                    updated_at timestamptz NOT NULL
+                ) ON COMMIT PRESERVE ROWS",
+            )
+            .unwrap();
+
+        let busy_lock = "task-transition:task-workflow-page-busy";
+        assert!(
+            blocker
+                .client()
+                .query_one(
+                    "SELECT pg_try_advisory_lock(hashtextextended($1,0))",
+                    &[&busy_lock],
+                )
+                .unwrap()
+                .get::<_, bool>(0)
+        );
+        for index in 0..65_i32 {
+            let id = format!("trn_page_{index:03}");
+            let task_id = if index < 64 {
+                "task-workflow-page-busy"
+            } else {
+                "task-workflow-page-available"
+            };
+            worker
+                .client()
+                .execute(
+                    "INSERT INTO task_transition_runs(id,task_id,actor_id,credential_id,auth_method,record,updated_at) VALUES($1,$2,'act_test','ses_test','session','{\"status\":\"ready\"}',clock_timestamp()+($3::integer*interval '1 second'))",
+                    &[&id, &task_id, &index],
+                )
+                .unwrap();
+        }
+
+        let pending = TaskTransitionContinuation::select(&mut worker)
+            .unwrap()
+            .expect("selection should scan beyond the locked first page");
+        assert_eq!(pending.id, "trn_page_064");
+        TaskTransitionContinuation::release_task_lock(&mut worker, &pending.task_id).unwrap();
+        blocker
+            .client()
+            .query_one(
+                "SELECT pg_advisory_unlock(hashtextextended($1,0))",
+                &[&busy_lock],
+            )
+            .unwrap();
     }
 }

@@ -77,9 +77,11 @@ impl TaskTransitionProviderAuthority {
         if restricted_role.is_some() {
             return Err(PlatformError::Forbidden);
         }
+        // Read the connection id without locking the repository. Lock the connection first,
+        // then re-read and lock the repository, matching the API's unshare lock order.
         let binding = transaction
             .query_opt(
-                "SELECT connection_id,source_kind,revision FROM project_repositories WHERE id=$1 AND project_id=$2 AND NOT archived FOR SHARE",
+                "SELECT connection_id,source_kind,revision FROM project_repositories WHERE id=$1 AND project_id=$2 AND NOT archived",
                 &[&repository_id, &project_id],
             )
             .map_err(|_| PlatformError::Storage)?
@@ -102,6 +104,19 @@ impl TaskTransitionProviderAuthority {
             )
             .map_err(|_| PlatformError::Storage)?
             .ok_or(PlatformError::Conflict("repository source is not authorized"))?;
+        let locked_binding = transaction
+            .query_opt(
+                "SELECT connection_id,source_kind,revision FROM project_repositories WHERE id=$1 AND project_id=$2 AND NOT archived FOR SHARE",
+                &[&repository_id, &project_id],
+            )
+            .map_err(|_| PlatformError::Storage)?
+            .ok_or(PlatformError::NotFound)?;
+        if locked_binding.get::<_, Option<String>>(0).as_deref() != Some(&connection_id)
+            || locked_binding.get::<_, String>(1) != "git"
+            || locked_binding.get::<_, i64>(2) != binding.get::<_, i64>(2)
+        {
+            return Err(PlatformError::Conflict("repository revision changed"));
+        }
         let owner: String = connection.get(0);
         transaction
             .query_opt(
@@ -139,7 +154,7 @@ impl TaskTransitionProviderAuthority {
         let remote_full_name = metadata["remote_full_name"].clone();
         let provider = metadata["provider"].clone();
         let host = metadata["host"].clone();
-        let repository_revision: i64 = binding.get(2);
+        let repository_revision: i64 = locked_binding.get(2);
         let connection_revision: i64 = connection.get(1);
         let credential_revision: i64 = transaction
             .query_one(

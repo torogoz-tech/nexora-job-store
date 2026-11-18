@@ -50,13 +50,7 @@ impl TaskTransitionRun {
                 )
                 .map_err(|_| PlatformError::Storage)?
                 .ok_or(PlatformError::Forbidden)?;
-            transaction
-                .query_opt(
-                    "SELECT t.id FROM tasks t JOIN actor_roles r ON r.actor_id=$2 WHERE t.id=$1 AND t.assignee_id=$2 AND r.role IN ('developer','technical_lead','manager','pmo','super_admin') FOR SHARE OF r",
-                    &[&task_id, &context.actor_id()],
-                )
-                .map_err(|_| PlatformError::Storage)?
-                .ok_or(PlatformError::Forbidden)?;
+            Self::require_projectless_assignment(&mut transaction, context, task_id)?;
         }
         transaction.commit().map_err(|_| PlatformError::Storage)?;
         Ok(task)
@@ -125,6 +119,9 @@ impl TaskTransitionRun {
             task_id,
             Capability::TasksTransition,
         )?;
+        if task.project_id.is_none() {
+            Self::require_projectless_assignment(&mut transaction, context, task_id)?;
+        }
         transaction
             .execute(
                 "UPDATE task_transition_runs SET record=$2,updated_at=clock_timestamp() WHERE id=$1",
@@ -147,6 +144,21 @@ impl TaskTransitionRun {
         });
         TaskTransitionAudit::event(&mut transaction, context, &task, operation, details)?;
         transaction.commit().map_err(|_| PlatformError::Storage)
+    }
+
+    fn require_projectless_assignment(
+        transaction: &mut postgres::Transaction<'_>,
+        context: &AuthContext,
+        task_id: &str,
+    ) -> Result<(), PlatformError> {
+        transaction
+            .query_opt(
+                "SELECT t.id FROM tasks t JOIN actor_roles r ON r.actor_id=$2 WHERE t.id=$1 AND t.project_id IS NULL AND t.assignee_id=$2 AND r.role IN ('developer','technical_lead','manager','pmo','super_admin') FOR SHARE OF t,r",
+                &[&task_id, &context.actor_id()],
+            )
+            .map_err(|_| PlatformError::Storage)?
+            .ok_or(PlatformError::Forbidden)?;
+        Ok(())
     }
 }
 
@@ -202,8 +214,8 @@ fn failure_details(error: &PlatformError) -> (&'static str, &'static str) {
 
 #[cfg(test)]
 mod tests {
-    use super::failure_details;
-    use nexora_platform::PlatformError;
+    use super::{TaskTransitionRun, failure_details};
+    use nexora_platform::{ActorKind, AuthContext, AuthMethod, PlatformError};
 
     #[test]
     fn approval_failure_preserves_waiting_semantics() {
@@ -225,5 +237,59 @@ mod tests {
                 "Provider request failed or outcome is uncertain. Retry to reconcile; another pull request will not be created blindly."
             )
         );
+    }
+
+    #[test]
+    #[ignore = "requires isolated PostgreSQL with API migration 0088 applied"]
+    fn projectless_failure_assignment_check_rejects_reassigned_actor() {
+        use crate::TaskWorkflowStore;
+        use nexora_database_connections::DatabaseConnections;
+        use std::path::Path;
+
+        let settings_path = std::env::var("NEXORA_TASK_WORKFLOW_TEST_DATABASE")
+            .expect("set NEXORA_TASK_WORKFLOW_TEST_DATABASE to a private connection-settings file");
+        let settings = DatabaseConnections::load(Path::new(&settings_path)).unwrap();
+        let namespace = std::env::var("NEXORA_TASK_WORKFLOW_TEST_NAMESPACE")
+            .unwrap_or_else(|_| "nexora_platform_test".into());
+        let mut store = TaskWorkflowStore::connect(&settings, &namespace).unwrap();
+        store
+            .client()
+            .batch_execute(
+                "CREATE TEMP TABLE tasks (id text PRIMARY KEY, project_id text, assignee_id text);
+                 CREATE TEMP TABLE actor_roles (actor_id text, role text);
+                 INSERT INTO tasks VALUES ('tsk_projectless_fixture', NULL, 'act_projectless_fixture');
+                 INSERT INTO actor_roles VALUES ('act_projectless_fixture', 'developer');",
+            )
+            .unwrap();
+        let context = AuthContext::new(
+            "act_projectless_fixture".into(),
+            ActorKind::Human,
+            AuthMethod::Session,
+            "ses_projectless_fixture".into(),
+            Vec::new(),
+            None,
+        );
+        let mut transaction = store.client().transaction().unwrap();
+
+        TaskTransitionRun::require_projectless_assignment(
+            &mut transaction,
+            &context,
+            "tsk_projectless_fixture",
+        )
+        .unwrap();
+        transaction
+            .execute(
+                "UPDATE tasks SET assignee_id='act_reassigned' WHERE id='tsk_projectless_fixture'",
+                &[],
+            )
+            .unwrap();
+        assert!(matches!(
+            TaskTransitionRun::require_projectless_assignment(
+                &mut transaction,
+                &context,
+                "tsk_projectless_fixture",
+            ),
+            Err(PlatformError::Forbidden)
+        ));
     }
 }
