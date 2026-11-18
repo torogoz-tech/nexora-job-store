@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.4.0 - Unreleased
+## 0.4.0 - 2026-11-18
 
 - Initial independent repository extraction for Nexora 0.4.0.
 - Add a notification persistence package so the notification worker can claim, authorize, render, and finish email deliveries without depending on the API's full platform store.
