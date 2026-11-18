@@ -10,7 +10,7 @@ repository = "https://github.com/torogoz-tech/nexora-job-store"
 nexora-analysis-store = { path = "../nexora-analysis-store" }
 nexora-database-connections = { path = "../nexora-database-connections" }
 nexora-platform.workspace = true
-nexora-source = { git = "https://github.com/torogoz-tech/nexora-analysis-engine.git", tag = "0.4.0" }
+nexora-source = { git = "https://github.com/torogoz-tech/nexora-analysis-engine.git", tag = "0.4.0-final" }
 postgres.workspace = true
 serde_json.workspace = true
 getrandom.workspace = true

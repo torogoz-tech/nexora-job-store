@@ -17,3 +17,4 @@
 - Extract durable task transition execution, AI review and private contributor-rating jobs, claim fencing, bounded retry state, and generation-fenced RabbitMQ wake intents into `nexora-task-workflow`.
 - Add worker-facing startup recovery and one-shot lease-expiry lookup operations so multiple worker replicas can recover work without periodic task-job polling.
 - Pin shared platform contracts to the immutable coordinated `0.4.0-final` contract tag.
+- Pin shared analysis-engine crates to the coordinated `0.4.0-final` tag so runtime types resolve from one source revision.

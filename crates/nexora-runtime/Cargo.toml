@@ -22,4 +22,4 @@ base64.workspace = true
 flate2.workspace = true
 
 [dev-dependencies]
-nexora-language = { git = "https://github.com/torogoz-tech/nexora-analysis-engine.git", tag = "0.4.0" }
+nexora-language = { git = "https://github.com/torogoz-tech/nexora-analysis-engine.git", tag = "0.4.0-final" }
