@@ -216,14 +216,17 @@ impl AnalysisProfileReportStore {
                 }
             }
         }
-        Self::paths(&selection["uncovered_files"], &mut paths)?;
+        let mut uncovered_paths = BTreeSet::new();
+        Self::paths(&selection["uncovered_files"], &mut uncovered_paths)?;
+        unknown_paths.extend(uncovered_paths);
+        paths.extend(unknown_paths.iter().cloned());
         Self::paths(&selection["excluded_files"], &mut paths)?;
         if let Some(unknown_files) = selection.get("unknown_files") {
             let mut reported_unknown_paths = BTreeSet::new();
             Self::paths(unknown_files, &mut reported_unknown_paths)?;
             if reported_unknown_paths != unknown_paths {
                 return Err(Self::invalid(
-                    "unknown files do not match skipped files marked unknown",
+                    "unknown files do not match skipped and uncovered files",
                 ));
             }
         }
