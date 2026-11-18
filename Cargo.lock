@@ -1276,6 +1276,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "nexora-task-workflow"
+version = "0.4.0"
+dependencies = [
+ "nexora-analysis-store",
+ "nexora-database-connections",
+ "nexora-platform",
+]
+
+[[package]]
 name = "num-bigint"
 version = "0.4.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"

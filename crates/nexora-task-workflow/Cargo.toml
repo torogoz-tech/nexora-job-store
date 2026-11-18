@@ -1,0 +1,12 @@
+[package]
+name = "nexora-task-workflow"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Shared task transition runtime foundations for Nexora"
+repository = "https://github.com/torogoz-tech/nexora-job-store"
+
+[dependencies]
+nexora-analysis-store.workspace = true
+nexora-database-connections.workspace = true
+nexora-platform.workspace = true

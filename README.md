@@ -2,6 +2,8 @@
 
 Shared PostgreSQL persistence packages for durable Nexora worker jobs. This workspace separates analysis, release, knowledge, and notification operations into independently selectable Cargo packages. `nexora-runtime` owns snapshot, graph, query, cache, and knowledge runtime adapters. `nexora-analysis-store` owns provider-backed repository analysis access and bounded Git source plans. `nexora-release-store` owns authorized release composition jobs, provider branch verification, and durable composition evidence. `nexora-knowledge-store` owns knowledge-job persistence, API-compatible OpenAI runtime settings, encrypted credential reads, and deterministic source chunking. `nexora-notification-store` owns SMTP notification claiming, retry state, authorization checks, email rendering, and decryption of installation-managed SMTP and action-token secrets.
 
+`nexora-task-workflow` provides the PostgreSQL session and Git policy for the shared task transition runtime. Its `0.4.0` baseline connects to an existing platform schema and accepts the same Git policy JSON as `nexora-analysis-store`. The API owns schema creation, migrations, and transition execution at this stage.
+
 PostgreSQL is authoritative for job state. RabbitMQ wake-up messages only notify workers to drain eligible work. Preserve existing lease fencing, retry limits, cancellation rules, project/tenant scope, recipient authorization, secret-encryption formats, and terminal states while extracting the stores.
 
 All packages in this repository are released together at version `0.4.0`.
