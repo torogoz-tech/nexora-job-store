@@ -8,3 +8,4 @@ license.workspace = true
 nexora-core.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+postgres.workspace = true
