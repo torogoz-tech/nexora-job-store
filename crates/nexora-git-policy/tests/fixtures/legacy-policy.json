@@ -1,0 +1,4 @@
+{
+  "gitlab_origin": "https://gitlab.example.org",
+  "callback_origin": "https://nexora.example.org"
+}

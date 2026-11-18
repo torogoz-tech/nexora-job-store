@@ -1,4 +1,4 @@
-use nexora_analysis_store::GitNetworkPolicy as AnalysisGitNetworkPolicy;
+use nexora_git_policy::GitNetworkPolicy as SharedGitNetworkPolicy;
 use nexora_platform::PlatformError;
 use nexora_task_workflow::GitNetworkPolicy;
 use std::path::Path;
@@ -11,7 +11,7 @@ fn fixture(name: &str) -> std::path::PathBuf {
 
 #[test]
 fn default_policy_uses_public_provider_origins_and_ip_loopback_callback() {
-    let policy: AnalysisGitNetworkPolicy = GitNetworkPolicy::default();
+    let policy: SharedGitNetworkPolicy = GitNetworkPolicy::default();
     policy.validate().unwrap();
 
     assert_eq!(policy.gitlab_origin, "https://gitlab.com");

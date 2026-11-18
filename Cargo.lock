@@ -1050,6 +1050,7 @@ dependencies = [
  "jsonwebtoken",
  "nexora-core",
  "nexora-database-connections",
+ "nexora-git-policy",
  "nexora-language",
  "nexora-platform",
  "nexora-runtime",
@@ -1093,6 +1094,16 @@ dependencies = [
  "postgres",
  "serde",
  "serde_json",
+]
+
+[[package]]
+name = "nexora-git-policy"
+version = "0.4.0"
+dependencies = [
+ "nexora-platform",
+ "serde",
+ "serde_json",
+ "url",
 ]
 
 [[package]]
@@ -1279,8 +1290,8 @@ dependencies = [
 name = "nexora-task-workflow"
 version = "0.4.0"
 dependencies = [
- "nexora-analysis-store",
  "nexora-database-connections",
+ "nexora-git-policy",
  "nexora-platform",
 ]
 

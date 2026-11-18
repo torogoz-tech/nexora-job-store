@@ -15,6 +15,7 @@ hkdf.workspace = true
 jsonwebtoken = { version = "=11.1.0", features = ["rust_crypto"] }
 nexora-core.workspace = true
 nexora-database-connections = { path = "../nexora-database-connections" }
+nexora-git-policy.workspace = true
 nexora-language = { git = "https://github.com/torogoz-tech/nexora-analysis-engine.git", tag = "0.4.0" }
 nexora-platform.workspace = true
 nexora-runtime = { path = "../nexora-runtime" }
