@@ -89,9 +89,9 @@ fn exercise_notification_claims(
          CREATE TABLE {namespace}.actors(id text PRIMARY KEY, active boolean NOT NULL, kind text NOT NULL);
          CREATE TABLE {namespace}.actor_grants(actor_id text NOT NULL, capability text NOT NULL, project_id text);
          CREATE TABLE {namespace}.installation_preferences(singleton boolean PRIMARY KEY, language text NOT NULL);
-         CREATE TABLE {namespace}.user_email_changes(expires_at timestamptz, used_at timestamptz, attempts integer, token_secret bytea);
-         CREATE TABLE {namespace}.member_invitations(expires_at timestamptz, status text, token_secret bytea);
-         CREATE TABLE {namespace}.password_reset_requests(expires_at timestamptz, used_at timestamptz, token_secret bytea);
+         CREATE TABLE {namespace}.user_email_changes(id text, expires_at timestamptz, used_at timestamptz, attempts integer, token_secret bytea);
+         CREATE TABLE {namespace}.member_invitations(id text, expires_at timestamptz, status text, token_secret bytea);
+         CREATE TABLE {namespace}.password_reset_requests(id text, expires_at timestamptz, used_at timestamptz, token_secret bytea);
          CREATE TABLE {namespace}.email_notifications(
              event_key text PRIMARY KEY, kind text NOT NULL, project_id text, resource_id text NOT NULL,
              actor_id text NOT NULL, status text NOT NULL, attempts integer NOT NULL,
@@ -99,21 +99,29 @@ fn exercise_notification_claims(
          );"
     ))?;
     admin.execute(
-        "INSERT INTO actors(id,active,kind) VALUES('authorized',true,'human'),('inactive',false,'human')",
+        &format!(
+            "INSERT INTO {namespace}.actors(id,active,kind) VALUES('authorized',true,'human'),('inactive',false,'human')"
+        ),
         &[],
     )?;
     admin.execute(
-        "INSERT INTO actor_grants(actor_id,capability,project_id) VALUES('authorized','installation:manage',NULL)",
+        &format!(
+            "INSERT INTO {namespace}.actor_grants(actor_id,capability,project_id) VALUES('authorized','installation:manage',NULL)"
+        ),
         &[],
     )?;
     admin.execute(
-        "INSERT INTO installation_preferences(singleton,language) VALUES(true,'es')",
+        &format!(
+            "INSERT INTO {namespace}.installation_preferences(singleton,language) VALUES(true,'es')"
+        ),
         &[],
     )?;
     admin.execute(
-        "INSERT INTO email_notifications(event_key,kind,resource_id,actor_id,status,attempts,available_at,recipient_override)
+        &format!(
+            "INSERT INTO {namespace}.email_notifications(event_key,kind,resource_id,actor_id,status,attempts,available_at,recipient_override)
          VALUES('authorized-event','test','authorized-resource','authorized','pending',0,clock_timestamp(),'admin@example.test'),
-               ('inactive-event','test','inactive-resource','inactive','pending',0,clock_timestamp(),'inactive@example.test')",
+               ('inactive-event','test','inactive-resource','inactive','pending',0,clock_timestamp(),'inactive@example.test')"
+        ),
         &[],
     )?;
 
@@ -129,7 +137,9 @@ fn exercise_notification_claims(
     drop(store);
 
     let rows = admin.query(
-        "SELECT event_key,status,attempts FROM email_notifications ORDER BY event_key",
+        &format!(
+            "SELECT event_key,status,attempts FROM {namespace}.email_notifications ORDER BY event_key"
+        ),
         &[],
     )?;
     assert_eq!(rows.len(), 2);
