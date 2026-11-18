@@ -67,6 +67,9 @@ impl AnalysisProfileReportStore {
             return Err(Self::invalid("analysis profile plan is missing"));
         }
         let mut fields = vec!["policy", "profiles", "uncovered_files", "excluded_files"];
+        if selection.get("unknown_files").is_some() {
+            fields.push("unknown_files");
+        }
         if selection.get("excluded_directories").is_some() {
             fields.push("excluded_directories");
         }
@@ -113,14 +116,22 @@ impl AnalysisProfileReportStore {
             ));
         }
         let mut skipped_profiles = BTreeSet::new();
+        let mut unknown_paths = BTreeSet::new();
         for file in skipped {
+            let mut fields = vec!["path", "profile_id", "reason"];
             if file.get("checksum").is_some() {
-                Self::fields(file, &["path", "profile_id", "reason", "checksum"])?;
+                fields.push("checksum");
                 Self::checksum(&file["checksum"])?;
-            } else {
-                // A failed file read has no content from which to compute a checksum.
-                Self::fields(file, &["path", "profile_id", "reason"])?;
             }
+            if file.get("analysis_status").is_some() {
+                fields.push("analysis_status");
+                if file["analysis_status"] != "unknown" {
+                    return Err(Self::invalid(
+                        "skipped file analysis status must be unknown",
+                    ));
+                }
+            }
+            Self::fields(file, &fields)?;
             let id = file["profile_id"]
                 .as_str()
                 .ok_or_else(|| Self::invalid("skipped file has no profile id"))?;
@@ -134,6 +145,9 @@ impl AnalysisProfileReportStore {
                 ));
             }
             Self::paths(&serde_json::json!([file["path"]]), &mut paths)?;
+            if file.get("analysis_status").is_some() {
+                unknown_paths.insert(file["path"].as_str().unwrap().to_owned());
+            }
             skipped_profiles.insert(id);
         }
         for profile in profiles {
@@ -204,6 +218,15 @@ impl AnalysisProfileReportStore {
         }
         Self::paths(&selection["uncovered_files"], &mut paths)?;
         Self::paths(&selection["excluded_files"], &mut paths)?;
+        if let Some(unknown_files) = selection.get("unknown_files") {
+            let mut reported_unknown_paths = BTreeSet::new();
+            Self::paths(unknown_files, &mut reported_unknown_paths)?;
+            if reported_unknown_paths != unknown_paths {
+                return Err(Self::invalid(
+                    "unknown files do not match skipped files marked unknown",
+                ));
+            }
+        }
         if let Some(directories) = selection.get("excluded_directories") {
             Self::paths(directories, &mut paths)?;
         }
