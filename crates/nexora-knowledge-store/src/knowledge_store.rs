@@ -1,7 +1,10 @@
-use crate::{KnowledgeProcessingJob, knowledge_store_secret::KnowledgeStoreSecret};
+use crate::{
+    KnowledgeProcessingJob, KnowledgeProcessingSource, knowledge_store_secret::KnowledgeStoreSecret,
+};
 use nexora_database_connections::{DatabaseConnections, PostgresConnection};
 use nexora_platform::PlatformError;
 use postgres::{Client, error::SqlState};
+use serde_json::Value;
 
 pub struct KnowledgeStore {
     connection: PostgresConnection,
@@ -90,6 +93,109 @@ impl KnowledgeStore {
             )
             .map_err(Self::database_error)?;
         Ok(changed == 1)
+    }
+
+    pub fn knowledge_processing_source(
+        &mut self,
+        job: &KnowledgeProcessingJob,
+    ) -> Result<KnowledgeProcessingSource, PlatformError> {
+        let (title, body, kind) = match job.source_kind.as_str() {
+            "document" | "technical_debt" => self
+                .client()
+                .query_opt(
+                    "SELECT title,body FROM knowledge_contributions WHERE id=$1 AND revision=$2",
+                    &[&job.resource_id, &job.source_revision],
+                )
+                .map_err(Self::database_error)?
+                .map(|row| {
+                    (
+                        row.get(0),
+                        row.get(1),
+                        job.source_kind.clone(),
+                    )
+                })
+                .ok_or(PlatformError::NotFound)?,
+            "contribution" => self
+                .client()
+                .query_opt(
+                    "SELECT title,body,kind FROM knowledge_contributions WHERE id=$1 AND revision=$2",
+                    &[&job.resource_id, &job.source_revision],
+                )
+                .map_err(Self::database_error)?
+                .map(|row| (row.get(0), row.get(1), row.get(2)))
+                .ok_or(PlatformError::NotFound)?,
+            "organization_document" => self
+                .client()
+                .query_opt(
+                    "SELECT title,body FROM organization_document_versions WHERE document_id=$1 AND revision=$2",
+                    &[&job.resource_id, &job.source_revision],
+                )
+                .map_err(Self::database_error)?
+                .map(|row| (row.get(0), row.get(1), job.source_kind.clone()))
+                .ok_or(PlatformError::NotFound)?,
+            "project_document" => self
+                .client()
+                .query_opt(
+                    "SELECT title,content::text FROM project_document_versions WHERE document_id=$1 AND number=$2",
+                    &[&job.resource_id, &job.source_revision],
+                )
+                .map_err(Self::database_error)?
+                .map(|row| (row.get(0), row.get(1), job.source_kind.clone()))
+                .ok_or(PlatformError::NotFound)?,
+            _ => return Err(PlatformError::Validation("unsupported knowledge source")),
+        };
+
+        Ok(KnowledgeProcessingSource { title, body, kind })
+    }
+
+    pub fn finish_knowledge_processing(
+        &mut self,
+        job: &KnowledgeProcessingJob,
+        structure: &Value,
+        chunks: &[crate::KnowledgeChunkRecord],
+    ) -> Result<(), PlatformError> {
+        if !structure.is_object() || structure["summary"].as_str().is_none() {
+            return Err(PlatformError::Validation("invalid knowledge structure"));
+        }
+        let structure_bytes = serde_json::to_vec(structure).map_err(|_| PlatformError::Storage)?;
+        let structure_hash = KnowledgeStoreSecret::checksum(&structure_bytes);
+        let lease_digest = KnowledgeStoreSecret::digest(&job.lease_token);
+        let mut transaction = self.client().transaction().map_err(Self::database_error)?;
+        let status = transaction
+            .query_opt(
+                "SELECT status FROM knowledge_processing_jobs WHERE id=$1 AND source_kind=$2 AND resource_id=$3 AND source_revision=$4 AND lease_token_digest=$5 AND lease_until>clock_timestamp() FOR UPDATE",
+                &[&job.id, &job.source_kind, &job.resource_id, &job.source_revision, &lease_digest],
+            )
+            .map_err(Self::database_error)?
+            .map(|row| row.get::<_, String>(0));
+        if status.as_deref() != Some("processing") {
+            return Err(PlatformError::Conflict(
+                "knowledge processing job is no longer active",
+            ));
+        }
+
+        transaction
+            .execute(
+                "INSERT INTO knowledge_structures(job_id,source_kind,resource_id,source_revision,schema_version,structure,structure_hash,validation_status) VALUES($1,$2,$3,$4,'1.0',$5,$6,'valid') ON CONFLICT(job_id) DO UPDATE SET structure=$5,structure_hash=$6,validation_status='valid'",
+                &[&job.id, &job.source_kind, &job.resource_id, &job.source_revision, structure, &structure_hash],
+            )
+            .map_err(Self::database_error)?;
+        for chunk in chunks {
+            transaction
+                .execute(
+                    "INSERT INTO knowledge_chunks(id,job_id,project_id,source_kind,resource_id,source_revision,sequence,title,content,content_hash,published) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,false) ON CONFLICT(id) DO NOTHING",
+                    &[&chunk.id, &job.id, &job.project_id, &job.source_kind, &job.resource_id, &job.source_revision, &chunk.sequence, &chunk.title, &chunk.content, &chunk.content_hash],
+                )
+                .map_err(Self::database_error)?;
+        }
+        transaction
+            .execute(
+                "UPDATE knowledge_processing_jobs SET status='structured',updated_at=clock_timestamp(),last_error=NULL WHERE id=$1 AND status='processing' AND lease_token_digest=$2 AND lease_until>clock_timestamp()",
+                &[&job.id, &lease_digest],
+            )
+            .map_err(Self::database_error)?;
+        transaction.commit().map_err(Self::database_error)?;
+        Ok(())
     }
 
     pub(crate) fn client(&mut self) -> &mut Client {

@@ -1,5 +1,5 @@
 use nexora_database_connections::DatabaseConnections;
-use nexora_knowledge_store::KnowledgeStore;
+use nexora_knowledge_store::{KnowledgeChunkRecord, KnowledgeStore};
 use postgres::{Client, Config, NoTls};
 use std::{path::PathBuf, sync::Barrier};
 
@@ -92,6 +92,26 @@ fn concurrent_claims_assign_one_approved_job_to_only_one_worker() {
     let mut store = KnowledgeStore::connect(&settings, &namespace).unwrap();
     let second_lease = store.claim_knowledge_processing().unwrap().unwrap();
     assert_eq!(second_lease.id, first_lease.id);
+    let source = store.knowledge_processing_source(&second_lease).unwrap();
+    assert_eq!(source.title, "Reviewed source");
+    assert_eq!(source.body, "Source body");
+    assert_eq!(source.kind, "document");
+    let structure = serde_json::json!({ "summary": "Reviewed source summary" });
+    let chunks = [KnowledgeChunkRecord {
+        id: "chunk-a".to_owned(),
+        sequence: 0,
+        title: "Reviewed source".to_owned(),
+        content: "Source body".to_owned(),
+        content_hash: "chunk-hash-a".to_owned(),
+    }];
+    assert!(
+        store
+            .finish_knowledge_processing(&first_lease, &structure, &chunks)
+            .is_err()
+    );
+    store
+        .finish_knowledge_processing(&second_lease, &structure, &chunks)
+        .unwrap();
     assert!(
         !store
             .fail_knowledge_processing(&first_lease, "stale worker")
@@ -143,12 +163,31 @@ fn create_schema(admin: &mut Client, namespace: &str) -> Result<(), postgres::Er
              id text PRIMARY KEY, kind text NOT NULL, resource_id text NOT NULL,
              resource_revision bigint NOT NULL, status text NOT NULL
          );
+         CREATE TABLE {namespace}.knowledge_contributions (
+             id text NOT NULL, revision bigint NOT NULL, title text NOT NULL,
+             body text NOT NULL, kind text NOT NULL, PRIMARY KEY(id,revision)
+         );
+         CREATE TABLE {namespace}.knowledge_structures (
+             job_id text PRIMARY KEY, source_kind text NOT NULL, resource_id text NOT NULL,
+             source_revision bigint NOT NULL, schema_version text NOT NULL,
+             structure jsonb NOT NULL, structure_hash text NOT NULL,
+             validation_status text NOT NULL
+         );
+         CREATE TABLE {namespace}.knowledge_chunks (
+             id text PRIMARY KEY, job_id text NOT NULL, project_id text,
+             source_kind text NOT NULL, resource_id text NOT NULL, source_revision bigint NOT NULL,
+             sequence integer NOT NULL, title text NOT NULL, content text NOT NULL,
+             content_hash text NOT NULL, published boolean NOT NULL DEFAULT false,
+             UNIQUE(job_id,sequence)
+         );
          INSERT INTO {namespace}.knowledge_processing_jobs
              (id,source_kind,resource_id,source_revision,content_hash,status)
          VALUES ('job-approved','document','resource-a',1,'hash-a','queued'),
                 ('job-unreviewed','document','resource-b',1,'hash-b','queued');
          INSERT INTO {namespace}.knowledge_reviews
              (id,kind,resource_id,resource_revision,status)
-         VALUES ('review-a','contribution','resource-a',1,'approved');"
+         VALUES ('review-a','contribution','resource-a',1,'approved');
+         INSERT INTO {namespace}.knowledge_contributions(id,revision,title,body,kind)
+         VALUES ('resource-a',1,'Reviewed source','Source body','document');"
     ))
 }

@@ -14,6 +14,10 @@ impl KnowledgeStoreSecret {
         Sha256::digest(value.as_bytes()).to_vec()
     }
 
+    pub(crate) fn checksum(value: &[u8]) -> String {
+        Self::hex(&Sha256::digest(value))
+    }
+
     fn hex(bytes: &[u8]) -> String {
         bytes.iter().map(|byte| format!("{byte:02x}")).collect()
     }
