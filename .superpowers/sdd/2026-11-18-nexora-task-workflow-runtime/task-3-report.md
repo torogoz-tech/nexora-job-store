@@ -50,3 +50,20 @@ Review-fix verification:
 - `cargo clippy -p nexora-task-workflow --locked --all-targets -- -D warnings` — passed.
 - `cargo tree -e normal -p nexora-task-workflow --locked` — inspected; the normal dependency graph remains limited to platform, database connection, Git policy, PostgreSQL, and serialization crates, with no API store, analysis store, indexer, or runtime.
 - `git diff --check` — passed.
+
+## Review-fix round 2 (`06a58c6`)
+
+- **Project lock finding — not applicable.** The reviewed source already locks the active project row with `FOR SHARE` before touching provider authority, matching the API's `unshare` coordination. Kept this implementation unchanged.
+- **Stable scan eligibility.** Each selection now obtains one PostgreSQL `clock_timestamp()` cutoff, derives the `waiting_external` eligibility threshold once, and binds that same threshold into every keyset page and the post-advisory-lock reread. A row cannot become eligible behind the cursor during a scan. Added a unit test for the fixed cutoff calculation.
+- **Abandoned `running` recovery.** Candidate selection and the post-lock recheck accept every `running` row regardless of age. The engine's per-task advisory lock is the ownership signal: an active worker holds it and is skipped; a lock-free run can be recovered immediately.
+- **One-shot delayed wake support.** Added a concrete query returning the DB-derived delay to the earliest future `waiting_external` recheck as `Option<Duration>`. Added a conversion unit test and an ignored PostgreSQL integration assertion for an actual future due time.
+
+Verification:
+
+- `cargo fmt --all` — passed.
+- `cargo test -p nexora-task-workflow --locked` — passed: 16 passed, 3 ignored, 0 failed. The ignored PostgreSQL cases require a private test database with API migration 0088 and were not executed.
+- `cargo check -p nexora-task-workflow --locked` — passed.
+- `cargo clippy -p nexora-task-workflow --locked --all-targets -- -D warnings` — passed.
+- Normal dependency tree exclusion check and `git diff --check` — passed.
+
+No API, plan, spec, progress ledger, or pre-existing untracked `docs/` files were changed. This fix is local on `develop`; no push or PR was made.

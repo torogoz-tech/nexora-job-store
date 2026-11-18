@@ -4,6 +4,7 @@ use crate::{
 };
 use nexora_platform::{AuthContext, AuthMethod, PlatformError};
 use serde_json::{Value, json};
+use std::time::{Duration, SystemTime};
 
 /// Internal continuation-selection and original-authority failure operations.
 pub(crate) struct TaskTransitionContinuation;
@@ -14,16 +15,22 @@ impl TaskTransitionContinuation {
     pub(crate) fn select(
         store: &mut TaskWorkflowStore,
     ) -> Result<Option<PendingTaskTransition>, PlatformError> {
+        let scan_cutoff: SystemTime = store
+            .client()
+            .query_one("SELECT clock_timestamp()", &[])
+            .map_err(|_| PlatformError::Storage)?
+            .get(0);
+        let waiting_external_cutoff = waiting_external_cutoff(scan_cutoff)?;
         let mut cursor: Option<(String, String)> = None;
         loop {
             let rows = match cursor.as_ref() {
                 Some((updated_at, id)) => store.client().query(
-                    "SELECT id,task_id,actor_id,credential_id,auth_method,record,updated_at::text FROM task_transition_runs WHERE (record->>'status'='ready' OR (record->>'status'='waiting_external' AND updated_at<clock_timestamp()-interval '30 seconds') OR (record->>'status'='running' AND updated_at<clock_timestamp()-interval '30 seconds')) AND (updated_at,id)>($1::timestamptz,$2::text) ORDER BY updated_at,id LIMIT 64",
-                    &[updated_at, id],
+                    "SELECT id,task_id,actor_id,credential_id,auth_method,record,updated_at::text FROM task_transition_runs WHERE (record->>'status'='ready' OR (record->>'status'='waiting_external' AND updated_at<$1) OR record->>'status'='running') AND (updated_at,id)>($2::timestamptz,$3::text) ORDER BY updated_at,id LIMIT 64",
+                    &[&waiting_external_cutoff, updated_at, id],
                 ),
                 None => store.client().query(
-                    "SELECT id,task_id,actor_id,credential_id,auth_method,record,updated_at::text FROM task_transition_runs WHERE record->>'status'='ready' OR (record->>'status'='waiting_external' AND updated_at<clock_timestamp()-interval '30 seconds') OR (record->>'status'='running' AND updated_at<clock_timestamp()-interval '30 seconds') ORDER BY updated_at,id LIMIT 64",
-                    &[],
+                    "SELECT id,task_id,actor_id,credential_id,auth_method,record,updated_at::text FROM task_transition_runs WHERE record->>'status'='ready' OR (record->>'status'='waiting_external' AND updated_at<$1) OR record->>'status'='running' ORDER BY updated_at,id LIMIT 64",
+                    &[&waiting_external_cutoff],
                 ),
             }
             .map_err(|_| PlatformError::Storage)?;
@@ -48,8 +55,8 @@ impl TaskTransitionContinuation {
                 let run_id: String = row.get(0);
                 let original_updated_at: String = row.get(6);
                 let fresh = store.client().query_opt(
-                    "SELECT id,task_id,actor_id,credential_id,auth_method,record FROM task_transition_runs WHERE id=$1 AND task_id=$2 AND updated_at=$3::timestamptz AND (record->>'status'='ready' OR (record->>'status'='waiting_external' AND updated_at<clock_timestamp()-interval '30 seconds') OR (record->>'status'='running' AND updated_at<clock_timestamp()-interval '30 seconds'))",
-                    &[&run_id, &task_id, &original_updated_at],
+                    "SELECT id,task_id,actor_id,credential_id,auth_method,record FROM task_transition_runs WHERE id=$1 AND task_id=$2 AND updated_at=$3::timestamptz AND (record->>'status'='ready' OR (record->>'status'='waiting_external' AND updated_at<$4) OR record->>'status'='running')",
+                    &[&run_id, &task_id, &original_updated_at, &waiting_external_cutoff],
                 );
                 let fresh = match fresh {
                     Ok(Some(fresh)) => fresh,
@@ -80,6 +87,21 @@ impl TaskTransitionContinuation {
                 }));
             }
         }
+    }
+
+    /// Returns the DB-derived delay until the earliest waiting-external run is eligible.
+    /// The worker can use it for one delayed wake instead of periodic polling.
+    pub(crate) fn next_waiting_external_delay(
+        store: &mut TaskWorkflowStore,
+    ) -> Result<Option<Duration>, PlatformError> {
+        let row = store
+            .client()
+            .query_opt(
+                "SELECT EXTRACT(EPOCH FROM (MIN(updated_at+interval '30 seconds')-clock_timestamp()))::double precision FROM task_transition_runs WHERE record->>'status'='waiting_external' HAVING MIN(updated_at+interval '30 seconds')>clock_timestamp()",
+                &[],
+            )
+            .map_err(|_| PlatformError::Storage)?;
+        Ok(row.map(|row| delay_from_database_seconds(row.get(0))))
     }
 
     fn revalidate_original_authority(
@@ -176,6 +198,16 @@ impl TaskTransitionContinuation {
     }
 }
 
+fn waiting_external_cutoff(scan_cutoff: SystemTime) -> Result<SystemTime, PlatformError> {
+    scan_cutoff
+        .checked_sub(Duration::from_secs(30))
+        .ok_or(PlatformError::Storage)
+}
+
+fn delay_from_database_seconds(seconds: f64) -> Duration {
+    Duration::from_secs_f64(seconds.max(0.0))
+}
+
 fn authority_failure_patch(credential_invalid: bool) -> Value {
     let message = if credential_invalid {
         "Original execution credential expired or was revoked. Restore authority and retry explicitly."
@@ -215,6 +247,28 @@ mod tests {
                 "error_code":"transition_authority_changed",
                 "message":"Original execution authority changed. Reload the task and retry explicitly."
             })
+        );
+    }
+
+    #[test]
+    fn waiting_external_eligibility_uses_one_fixed_database_cutoff() {
+        use std::time::{Duration, UNIX_EPOCH};
+
+        let cutoff = UNIX_EPOCH + Duration::from_secs(1_000);
+        let stale_before = super::waiting_external_cutoff(cutoff).unwrap();
+
+        assert_eq!(stale_before, UNIX_EPOCH + Duration::from_secs(970));
+        assert_eq!(
+            super::waiting_external_cutoff(cutoff).unwrap(),
+            stale_before
+        );
+    }
+
+    #[test]
+    fn future_waiting_external_recheck_delay_preserves_fractional_seconds() {
+        assert_eq!(
+            super::delay_from_database_seconds(2.5),
+            std::time::Duration::from_millis(2_500)
         );
     }
 
@@ -279,6 +333,17 @@ mod tests {
             .expect("selection should scan beyond the locked first page");
         assert_eq!(pending.id, "trn_page_064");
         TaskTransitionContinuation::release_task_lock(&mut worker, &pending.task_id).unwrap();
+        worker
+            .client()
+            .execute(
+                "INSERT INTO task_transition_runs(id,task_id,actor_id,credential_id,auth_method,record,updated_at) VALUES('trn_waiting_due','task-workflow-waiting-due','act_test','ses_test','session','{\"status\":\"waiting_external\"}',clock_timestamp()-interval '27 seconds')",
+                &[],
+            )
+            .unwrap();
+        let delay = TaskTransitionContinuation::next_waiting_external_delay(&mut worker)
+            .unwrap()
+            .expect("future waiting-external recheck should be returned");
+        assert!(delay.as_secs_f64() > 1.0 && delay.as_secs_f64() < 4.0);
         blocker
             .client()
             .query_one(
