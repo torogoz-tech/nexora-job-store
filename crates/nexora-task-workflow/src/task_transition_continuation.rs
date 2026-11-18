@@ -21,16 +21,17 @@ impl TaskTransitionContinuation {
             .map_err(|_| PlatformError::Storage)?
             .get(0);
         let waiting_external_cutoff = waiting_external_cutoff(scan_cutoff)?;
+        let stale_running_cutoff = stale_running_cutoff(scan_cutoff)?;
         let mut cursor: Option<(String, String)> = None;
         loop {
             let rows = match cursor.as_ref() {
                 Some((updated_at, id)) => store.client().query(
-                    "SELECT id,task_id,actor_id,credential_id,auth_method,record,updated_at::text FROM task_transition_runs WHERE (record->>'status'='ready' OR (record->>'status'='waiting_external' AND updated_at<$1) OR record->>'status'='running') AND (updated_at,id)>($2::timestamptz,$3::text) ORDER BY updated_at,id LIMIT 64",
-                    &[&waiting_external_cutoff, updated_at, id],
+                    "SELECT id,task_id,actor_id,credential_id,auth_method,updated_at::text FROM task_transition_runs WHERE (record->>'status'='ready' OR (record->>'status'='waiting_external' AND updated_at<$1) OR (record->>'status'='running' AND updated_at<$2)) AND (updated_at,id)>($3::timestamptz,$4::text) ORDER BY updated_at,id LIMIT 64",
+                    &[&waiting_external_cutoff, &stale_running_cutoff, updated_at, id],
                 ),
                 None => store.client().query(
-                    "SELECT id,task_id,actor_id,credential_id,auth_method,record,updated_at::text FROM task_transition_runs WHERE record->>'status'='ready' OR (record->>'status'='waiting_external' AND updated_at<$1) OR record->>'status'='running' ORDER BY updated_at,id LIMIT 64",
-                    &[&waiting_external_cutoff],
+                    "SELECT id,task_id,actor_id,credential_id,auth_method,updated_at::text FROM task_transition_runs WHERE record->>'status'='ready' OR (record->>'status'='waiting_external' AND updated_at<$1) OR (record->>'status'='running' AND updated_at<$2) ORDER BY updated_at,id LIMIT 64",
+                    &[&waiting_external_cutoff, &stale_running_cutoff],
                 ),
             }
             .map_err(|_| PlatformError::Storage)?;
@@ -38,7 +39,7 @@ impl TaskTransitionContinuation {
                 return Ok(None);
             }
             for row in rows {
-                cursor = Some((row.get(6), row.get(0)));
+                cursor = Some((row.get(5), row.get(0)));
                 let task_id: String = row.get(1);
                 let lock_name = format!("task-transition:{task_id}");
                 let acquired: bool = store
@@ -53,10 +54,10 @@ impl TaskTransitionContinuation {
                     continue;
                 }
                 let run_id: String = row.get(0);
-                let original_updated_at: String = row.get(6);
+                let original_updated_at: String = row.get(5);
                 let fresh = store.client().query_opt(
-                    "SELECT id,task_id,actor_id,credential_id,auth_method,record FROM task_transition_runs WHERE id=$1 AND task_id=$2 AND updated_at=$3::timestamptz AND (record->>'status'='ready' OR (record->>'status'='waiting_external' AND updated_at<$4) OR record->>'status'='running')",
-                    &[&run_id, &task_id, &original_updated_at, &waiting_external_cutoff],
+                    "SELECT id,task_id,actor_id,credential_id,auth_method FROM task_transition_runs WHERE id=$1 AND task_id=$2 AND updated_at=$3::timestamptz AND (record->>'status'='ready' OR (record->>'status'='waiting_external' AND updated_at<$4) OR (record->>'status'='running' AND updated_at<$5))",
+                    &[&run_id, &task_id, &original_updated_at, &waiting_external_cutoff, &stale_running_cutoff],
                 );
                 let fresh = match fresh {
                     Ok(Some(fresh)) => fresh,
@@ -83,7 +84,6 @@ impl TaskTransitionContinuation {
                     actor_id: fresh.get(2),
                     credential_id: fresh.get(3),
                     auth_method: method,
-                    record: fresh.get(5),
                 }));
             }
         }
@@ -152,21 +152,6 @@ impl TaskTransitionContinuation {
         Ok(())
     }
 
-    pub(crate) fn fail_run_and_release(
-        store: &mut TaskWorkflowStore,
-        pending: &PendingTaskTransition,
-        context: &AuthContext,
-        run: &mut Value,
-        error: &PlatformError,
-    ) -> Result<(), PlatformError> {
-        let failed =
-            crate::task_transition_run::TaskTransitionRun::fail(store, context, run, error);
-        let released = Self::release_task_lock(store, &pending.task_id);
-        failed?;
-        released?;
-        Ok(())
-    }
-
     fn fail_authority_changed(
         store: &mut TaskWorkflowStore,
         pending: &PendingTaskTransition,
@@ -199,6 +184,12 @@ impl TaskTransitionContinuation {
 }
 
 fn waiting_external_cutoff(scan_cutoff: SystemTime) -> Result<SystemTime, PlatformError> {
+    scan_cutoff
+        .checked_sub(Duration::from_secs(30))
+        .ok_or(PlatformError::Storage)
+}
+
+fn stale_running_cutoff(scan_cutoff: SystemTime) -> Result<SystemTime, PlatformError> {
     scan_cutoff
         .checked_sub(Duration::from_secs(30))
         .ok_or(PlatformError::Storage)
@@ -269,6 +260,18 @@ mod tests {
         assert_eq!(
             super::delay_from_database_seconds(2.5),
             std::time::Duration::from_millis(2_500)
+        );
+    }
+
+    #[test]
+    fn running_continuations_require_a_stale_checkpoint() {
+        use std::time::{Duration, UNIX_EPOCH};
+
+        let scan_cutoff = UNIX_EPOCH + Duration::from_secs(1_000);
+
+        assert_eq!(
+            super::stale_running_cutoff(scan_cutoff).unwrap(),
+            UNIX_EPOCH + Duration::from_secs(970)
         );
     }
 

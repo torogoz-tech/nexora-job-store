@@ -32,6 +32,11 @@ impl TaskWorkflowStore {
 
         Ok(Self {
             _connection: connection,
+            namespace: namespace.to_owned(),
+            request_context: None,
+            transition_verified_facts: Vec::new(),
+            transition_run_checkpoint: None,
+            secret_directory: settings.secrets_directory.clone(),
         })
     }
 }

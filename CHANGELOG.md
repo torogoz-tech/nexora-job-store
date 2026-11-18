@@ -14,3 +14,6 @@
 - Replace runtime integration-test references to API checkout paths with explicit protected test-configuration and language-profile environment variables; retain public domain-boundary fixtures in the package.
 - Add the `nexora-git-policy` package as the canonical owner of the validated Git policy and preserve the analysis-store public re-export.
 - Add the `nexora-task-workflow` package with platform schema validation, shared database connection settings, and the existing Git policy JSON contract.
+- Extract durable task transition execution, AI review and private contributor-rating jobs, claim fencing, bounded retry state, and generation-fenced RabbitMQ wake intents into `nexora-task-workflow`.
+- Add worker-facing startup recovery and one-shot lease-expiry lookup operations so multiple worker replicas can recover work without periodic task-job polling.
+- Pin shared platform contracts to the immutable coordinated `0.4.0-final` contract tag.
