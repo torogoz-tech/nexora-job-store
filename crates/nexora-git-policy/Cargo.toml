@@ -1,0 +1,13 @@
+[package]
+name = "nexora-git-policy"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Validated Git network policy for Nexora"
+repository = "https://github.com/torogoz-tech/nexora-job-store"
+
+[dependencies]
+nexora-platform.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+url = "2"

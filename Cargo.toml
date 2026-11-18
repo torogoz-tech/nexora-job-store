@@ -10,11 +10,13 @@ license = "MIT"
 [workspace.dependencies]
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-nexora-core = { git = "https://github.com/torogoz-tech/nexora-platform-contracts.git", tag = "0.4.0" }
-nexora-platform = { git = "https://github.com/torogoz-tech/nexora-platform-contracts.git", tag = "0.4.0" }
-nexora-graph = { git = "https://github.com/torogoz-tech/nexora-analysis-engine.git", tag = "0.4.0" }
-nexora-storage = { git = "https://github.com/torogoz-tech/nexora-analysis-engine.git", tag = "0.4.0" }
-nexora-indexer = { git = "https://github.com/torogoz-tech/nexora-analysis-engine.git", tag = "0.4.0" }
+nexora-git-policy = { path = "crates/nexora-git-policy", version = "0.4.0" }
+nexora-database-connections = { path = "crates/nexora-database-connections", version = "0.4.0" }
+nexora-core = { git = "https://github.com/torogoz-tech/nexora-platform-contracts.git", tag = "0.4.0-final" }
+nexora-platform = { git = "https://github.com/torogoz-tech/nexora-platform-contracts.git", tag = "0.4.0-final" }
+nexora-graph = { git = "https://github.com/torogoz-tech/nexora-analysis-engine.git", tag = "0.4.0-final" }
+nexora-storage = { git = "https://github.com/torogoz-tech/nexora-analysis-engine.git", tag = "0.4.0-final" }
+nexora-indexer = { git = "https://github.com/torogoz-tech/nexora-analysis-engine.git", tag = "0.4.0-final" }
 postgres = { version = "0.19", features = ["with-serde_json-1"] }
 redis = { version = "0.32", default-features = false }
 ureq = { version = "3", default-features = false, features = ["json"] }

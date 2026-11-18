@@ -1,0 +1,26 @@
+[package]
+name = "nexora-task-workflow"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Shared task transition runtime foundations for Nexora"
+repository = "https://github.com/torogoz-tech/nexora-job-store"
+
+[dependencies]
+nexora-git-policy.workspace = true
+nexora-database-connections.workspace = true
+nexora-platform.workspace = true
+postgres.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+getrandom.workspace = true
+sha2.workspace = true
+url = "2"
+ureq.workspace = true
+zeroize.workspace = true
+jsonwebtoken = { version = "9.3.1", features = ["use_pem"] }
+time = "0.3"
+aes-gcm = { version = "0.10.3", default-features = false, features = ["aes", "alloc", "zeroize"] }
+hkdf = "0.12.4"
+hmac = "0.12"
+subtle = "2"
