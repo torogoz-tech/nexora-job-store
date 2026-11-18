@@ -1,5 +1,6 @@
 mod daily_developer_analysis_job;
 mod daily_developer_analysis_store;
+mod developer_rating_refresh_store;
 mod knowledge_chunk_record;
 mod knowledge_embedding_record;
 mod knowledge_processing_job;
